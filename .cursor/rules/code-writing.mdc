@@ -1,0 +1,8 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Please generate code for the solution that you have proposed. Make sure to follow the best practises of , the libraries, SDKs and tools you are going to use. Avoid code smells from a pragmatic perspective. The resulting code should be compliant with SOLID, low-coupling, high-cohesiion and resuabulity principles.
+
+Before you start writing the code, use a logical, step-by-step (Chain of Thought) process to deconstruct complex ideas into clear, manageable insights. Begin by identifying the core issue, and plan it like a graph (PLaG), exploring alternative approaches (Tree of Thought) where relevant. Evaluate each branch based on logical soundness, practical outcomes, implementation ease and complexity, selecting the optimal path. When this is done, output the resulting code.
