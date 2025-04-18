@@ -33,11 +33,31 @@ export const authAPI = {
   },
 
   // Login as voter with zk-SNARK proof
-  loginVoter: async (hashedIdentifier, zkProof) => {
+  login: async (hashedIdentifier, zkProof) => {
     try {
       const response = await api.post('/auth/login', { hashedIdentifier, zkProof });
       if (response.data.token) {
+        // Store the new auth token
         localStorage.setItem('authToken', response.data.token);
+        
+        // Store user identifier (consistent for each user)
+        localStorage.setItem('userIdentifier', hashedIdentifier);
+        
+        // Store nullifier hash from the proof to prevent double voting
+        if (zkProof.nullifierHash) {
+          localStorage.setItem('nullifierHash', zkProof.nullifierHash);
+        }
+        
+        // Check if user has already voted (using the consistent identifier)
+        const userVotedKey = `hasVoted_${hashedIdentifier}`;
+        const hasVoted = localStorage.getItem(userVotedKey) === 'true';
+        
+        // Update global voting status for backward compatibility
+        if (hasVoted) {
+          localStorage.setItem('hasVoted', 'true');
+        } else {
+          localStorage.removeItem('hasVoted');
+        }
       }
       return response.data;
     } catch (error) {
@@ -63,6 +83,9 @@ export const authAPI = {
   logout: () => {
     localStorage.removeItem('authToken');
     localStorage.removeItem('isAdmin');
+    localStorage.removeItem('hasVoted');
+    localStorage.removeItem('nullifierHash');
+    // Don't remove the user-specific voting records to maintain history
   },
 
   // Check if user is authenticated
@@ -74,6 +97,15 @@ export const authAPI = {
   isAdmin: () => {
     return localStorage.getItem('isAdmin') === 'true';
   },
+
+  // Check if current user has voted
+  hasVoted: () => {
+    const userIdentifier = localStorage.getItem('userIdentifier');
+    if (!userIdentifier) return false;
+    
+    const userVotedKey = `hasVoted_${userIdentifier}`;
+    return localStorage.getItem(userVotedKey) === 'true';
+  }
 };
 
 // Voting API calls
@@ -81,7 +113,14 @@ export const voteAPI = {
   // Cast a vote
   castVote: async (choice, zkProof) => {
     try {
-      const response = await api.post('/vote/cast', { choice, zkProof });
+      // Get the nullifier hash from localStorage or from the proof
+      const nullifierHash = localStorage.getItem('nullifierHash') || zkProof.nullifierHash;
+      
+      const response = await api.post('/vote/cast', { 
+        choice, 
+        zkProof,
+        nullifierHash // Include the nullifier hash to prevent double voting
+      });
       return response.data;
     } catch (error) {
       throw error.response?.data || error.message;

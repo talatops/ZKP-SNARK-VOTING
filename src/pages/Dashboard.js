@@ -8,27 +8,61 @@ const Dashboard = () => {
   const [statusMessage, setStatusMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Check if user is authenticated
+  // Check if user is authenticated and hasn't voted already
   useEffect(() => {
     if (!authAPI.isAuthenticated()) {
       navigate('/');
+      return;
+    }
+    
+    // Get user identifier
+    const userIdentifier = localStorage.getItem('userIdentifier');
+    if (!userIdentifier) {
+      console.error('User identifier missing');
+      return;
+    }
+    
+    // Check if this specific user has already voted
+    const userVotedKey = `hasVoted_${userIdentifier}`;
+    const hasAlreadyVoted = localStorage.getItem(userVotedKey) === 'true';
+    
+    if (hasAlreadyVoted) {
+      setHasVoted(true);
+      setStatusMessage('You have already cast your vote in this election.');
     }
   }, [navigate]);
 
   const handleVote = async (option) => {
+    // Get user identifier
+    const userIdentifier = localStorage.getItem('userIdentifier');
+    if (!userIdentifier) {
+      setStatusMessage('Error: User identifier missing. Please log in again.');
+      return;
+    }
+    
+    const userVotedKey = `hasVoted_${userIdentifier}`;
+    
+    // Prevent double voting for this specific user
+    if (hasVoted || localStorage.getItem(userVotedKey) === 'true') {
+      setStatusMessage('You have already cast your vote in this election.');
+      setHasVoted(true);
+      return;
+    }
+    
     setIsLoading(true);
     setStatusMessage('Processing your vote...');
     
     try {
-      // Generate a zk-SNARK proof for voting
-      // In a real app, we would pass the actual identifier,
-      // but for demo purposes, we'll just use a placeholder
-      const { zkProof } = await zkpUtils.generateVoteProof('voter-identifier', option);
+      // Generate a zk-SNARK proof for voting using the identifier and choice
+      const { zkProof } = await zkpUtils.generateVoteProof(userIdentifier, option);
       
       // Cast the vote via API
       const result = await voteAPI.castVote(option, zkProof);
       
+      // Mark as voted both in state and localStorage for this specific user
       setHasVoted(true);
+      localStorage.setItem(userVotedKey, 'true');
+      
       setStatusMessage(`Your vote for "${option}" has been recorded anonymously.`);
       
       // If the vote was recorded on the blockchain, show the transaction hash

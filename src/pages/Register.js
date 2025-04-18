@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import LockIcon from '../components/LockIcon';
-import { authAPI, zkpUtils } from '../utils/api';
+import { authAPI } from '../utils/api';
+import { hashIdentifier } from '../utils/api';
 
-const Login = () => {
+const Register = () => {
   const [identifier, setIdentifier] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [notRegistered, setNotRegistered] = useState(false);
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
@@ -20,31 +20,22 @@ const Login = () => {
     
     setIsLoading(true);
     setError('');
-    setNotRegistered(false);
     
     try {
-      // Generate a zk-SNARK proof for authentication
-      const { hashedIdentifier, zkProof } = await zkpUtils.generateAuthProof(identifier);
+      // Generate a hashed identifier for registration
+      const hashedIdentifier = await hashIdentifier(identifier);
       
-      // Authenticate with the backend
-      await authAPI.login(hashedIdentifier, zkProof);
+      // Register with the backend
+      await authAPI.registerVoter(hashedIdentifier);
       
-      // Redirect to dashboard on success
-      navigate('/dashboard');
+      // Redirect to login page on success
+      setError('');
+      navigate('/login');
     } catch (err) {
-      if (err.message?.includes('not registered') || err.message?.includes('not found')) {
-        setNotRegistered(true);
-        setError('You are not registered. Please register first.');
-      } else {
-        setError(err.message || 'Authentication failed. Please try again.');
-      }
+      setError(err.message || 'Registration failed. Please try again.');
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleRegister = () => {
-    navigate('/register');
   };
 
   return (
@@ -55,10 +46,10 @@ const Login = () => {
             <LockIcon className="h-16 w-16 text-primary-600" />
           </div>
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Anonymous Voter Authentication
+            Voter Registration
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
-            Secure and private voting with zk-SNARKs
+            Register to participate in secure and private voting
           </p>
         </div>
         
@@ -74,7 +65,7 @@ const Login = () => {
                 type="text"
                 required
                 className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md rounded-b-md focus:outline-none focus:ring-primary-500 focus:border-primary-500 focus:z-10 sm:text-sm"
-                placeholder="Enter your identifier (will be hashed)"
+                placeholder="Create your identifier (will be hashed)"
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
               />
@@ -83,18 +74,6 @@ const Login = () => {
 
           {error && (
             <div className="text-red-500 text-sm text-center">{error}</div>
-          )}
-
-          {notRegistered && (
-            <div className="flex justify-center">
-              <button
-                type="button"
-                onClick={handleRegister}
-                className="text-sm font-medium text-white bg-green-600 hover:bg-green-700 px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-              >
-                Register Now
-              </button>
-            </div>
           )}
 
           <div>
@@ -117,7 +96,7 @@ const Login = () => {
                   </svg>
                 </span>
               )}
-              {isLoading ? 'Authenticating...' : 'Authenticate Anonymously'}
+              {isLoading ? 'Registering...' : 'Register'}
             </button>
           </div>
         </form>
@@ -129,7 +108,7 @@ const Login = () => {
             </div>
             <div className="relative flex justify-center text-sm">
               <span className="px-2 bg-gray-100 text-gray-500">
-                Secure Authentication
+                Secure Registration
               </span>
             </div>
           </div>
@@ -140,19 +119,14 @@ const Login = () => {
             </p>
           </div>
           
-          <div className="mt-4 text-center text-sm space-x-4">
+          <div className="mt-4 text-center text-sm">
+            <span className="text-gray-500">Already registered?</span>
+            {' '}
             <button
-              onClick={() => navigate('/register')}
+              onClick={() => navigate('/login')}
               className="font-medium text-primary-600 hover:text-primary-500"
             >
-              First time? Register here
-            </button>
-            <span className="text-gray-500">|</span>
-            <button
-              onClick={() => navigate('/admin-login')}
-              className="font-medium text-primary-600 hover:text-primary-500"
-            >
-              Administrator Login
+              Login here
             </button>
           </div>
         </div>
@@ -161,4 +135,4 @@ const Login = () => {
   );
 };
 
-export default Login; 
+export default Register; 
