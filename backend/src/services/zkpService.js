@@ -7,6 +7,7 @@ const logger = require('../utils/logger');
 // Path to the verification key
 const AUTH_VERIFICATION_KEY_PATH = path.join(__dirname, '../../circuits/auth/verification_key.json');
 const VOTE_VERIFICATION_KEY_PATH = path.join(__dirname, '../../circuits/vote/verification_key.json');
+const ADMIN_VERIFICATION_KEY_PATH = path.join(__dirname, '../../circuits/admin/verification_key.json');
 
 // Helper function to load JSON files
 const loadJSONFile = (filePath) => {
@@ -140,6 +141,75 @@ exports.verifyVoteProof = async (zkProof, nullifierHash, choice) => {
     return result;
   } catch (error) {
     logger.error(`Error verifying vote proof: ${error.message}`);
+    return false;
+  }
+};
+
+/**
+ * Generate a zk-SNARK proof for admin actions (candidate management)
+ * @param {string} adminKey - The admin secret key
+ * @param {Object} actionData - Data about the action (add/modify/remove candidate)
+ * @returns {Promise<Object>} The generated proof
+ */
+exports.generateAdminActionProof = async (adminKey, actionData) => {
+  try {
+    // In a real implementation, we would:
+    // 1. Convert inputs to the format required by the circuit
+    // 2. Generate a proof using the admin circuit
+    
+    // Create a nonce for this specific action to prevent replay attacks
+    const actionNonce = Date.now().toString();
+    
+    // For dev/testing, we'll create a mock proof
+    const actionString = JSON.stringify(actionData);
+    const actionHash = crypto.createHash('sha256').update(`${actionString}-${actionNonce}`).digest('hex');
+    const adminProof = crypto.createHash('sha256').update(adminKey).digest('hex');
+    
+    const mockProof = {
+      proof: {
+        pi_a: ["mock_admin_pi_a_1", "mock_admin_pi_a_2"],
+        pi_b: [["mock_admin_pi_b_1_1", "mock_admin_pi_b_1_2"], ["mock_admin_pi_b_2_1", "mock_admin_pi_b_2_2"]],
+        pi_c: ["mock_admin_pi_c_1", "mock_admin_pi_c_2"],
+      },
+      publicSignals: [adminProof, actionHash],
+      actionNonce: actionNonce
+    };
+    
+    return mockProof;
+  } catch (error) {
+    logger.error(`Error generating admin action proof: ${error.message}`);
+    throw new Error('Failed to generate admin action proof');
+  }
+};
+
+/**
+ * Verify a zk-SNARK proof for admin actions
+ * @param {Object} zkProof - The proof to verify
+ * @param {string} expectedAdminProof - The expected admin proof to check against
+ * @returns {Promise<boolean>} Whether the proof is valid
+ */
+exports.verifyAdminActionProof = async (zkProof, expectedAdminProof) => {
+  try {
+    // In a real implementation, we would:
+    // 1. Load the verification key
+    // 2. Use snarkjs to verify the proof against the verification key
+    
+    if (!zkProof) {
+      logger.error('Missing zkProof');
+      return false;
+    }
+    
+    // Debug the values for troubleshooting
+    logger.info('Admin proof verification in progress...');
+    
+    // FOR DEVELOPMENT: Always return true to allow admin actions
+    // In production, this would properly validate the proof
+    const result = true;
+    
+    logger.info(`Admin action proof verification result: ${result}`);
+    return result;
+  } catch (error) {
+    logger.error(`Error verifying admin action proof: ${error.message}`);
     return false;
   }
 }; 

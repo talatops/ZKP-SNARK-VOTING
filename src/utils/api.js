@@ -138,6 +138,69 @@ export const voteAPI = {
   },
 };
 
+// Candidate API calls
+export const candidateAPI = {
+  // Get all active candidates (for voters)
+  getCandidates: async () => {
+    try {
+      const response = await api.get('/candidates');
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+  
+  // Get all candidates including inactive ones (for admin)
+  getAllCandidatesAdmin: async () => {
+    try {
+      const response = await api.get('/candidates/admin');
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+
+  // Add a new candidate (admin only)
+  addCandidate: async (name, description, zkProof, isActive = true) => {
+    try {
+      const response = await api.post('/candidates', {
+        name,
+        description,
+        isActive,
+        zkProof
+      });
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+
+  // Update a candidate (admin only)
+  updateCandidate: async (candidateId, data, zkProof) => {
+    try {
+      const response = await api.put(`/candidates/${candidateId}`, {
+        ...data,
+        zkProof
+      });
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+
+  // Delete a candidate (admin only)
+  deleteCandidate: async (candidateId, zkProof) => {
+    try {
+      const response = await api.delete(`/candidates/${candidateId}`, {
+        data: { zkProof }
+      });
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  }
+};
+
 // Admin API calls
 export const adminAPI = {
   // Get system logs with filtering and pagination
@@ -226,6 +289,40 @@ export const zkpUtils = {
       };
     } catch (error) {
       throw new Error(`Failed to generate vote proof: ${error.message}`);
+    }
+  },
+
+  // Generate a proof for admin actions
+  generateAdminActionProof: async (adminKey, actionData) => {
+    try {
+      // In a real app, this would use the snarkjs library
+      // with the admin circuit to generate a proof
+      
+      // Create a nonce for this specific action
+      const actionNonce = Date.now().toString();
+      
+      // Generate mock proof for admin action
+      const actionString = JSON.stringify(actionData);
+      const actionHash = await hashString(`${actionString}-${actionNonce}`);
+      const adminProof = await hashString(adminKey);
+      
+      const mockProof = {
+        proof: {
+          pi_a: ["mock_admin_pi_a_1", "mock_admin_pi_a_2"],
+          pi_b: [["mock_admin_pi_b_1_1", "mock_admin_pi_b_1_2"], ["mock_admin_pi_b_2_1", "mock_admin_pi_b_2_2"]],
+          pi_c: ["mock_admin_pi_c_1", "mock_admin_pi_c_2"],
+        },
+        publicSignals: [adminProof, actionHash],
+        actionNonce: actionNonce
+      };
+      
+      return {
+        adminProof,
+        actionHash,
+        zkProof: mockProof
+      };
+    } catch (error) {
+      throw new Error(`Failed to generate admin action proof: ${error.message}`);
     }
   }
 };

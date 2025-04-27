@@ -3,20 +3,8 @@ const crypto = require('crypto');
 const User = require('../models/User');
 const SystemLog = require('../models/SystemLog');
 const logger = require('../utils/logger');
+const { logSystemEvent } = logger;
 const zkpService = require('../services/zkpService');
-
-// Helper to log system events
-const logSystemEvent = async (level, message, details = '') => {
-  try {
-    await SystemLog.create({
-      level,
-      message,
-      details
-    });
-  } catch (error) {
-    logger.error(`Failed to log event: ${error.message}`);
-  }
-};
 
 // Register a voter with a hashed identifier
 exports.registerVoter = async (req, res, next) => {

@@ -1,5 +1,6 @@
 const winston = require('winston');
 const path = require('path');
+const SystemLog = require('../models/SystemLog');
 
 // Define log format
 const logFormat = winston.format.combine(
@@ -42,4 +43,18 @@ const logger = winston.createLogger({
   exitOnError: false, // do not exit on handled exceptions
 });
 
-module.exports = logger; 
+// Helper to log system events to database
+const logSystemEvent = async (level, message, details = '') => {
+  try {
+    await SystemLog.create({
+      level,
+      message,
+      details
+    });
+  } catch (error) {
+    logger.error(`Failed to log event: ${error.message}`);
+  }
+};
+
+module.exports = logger;
+module.exports.logSystemEvent = logSystemEvent; 

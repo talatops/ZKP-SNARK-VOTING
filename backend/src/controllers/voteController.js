@@ -2,21 +2,9 @@ const User = require('../models/User');
 const Vote = require('../models/Vote');
 const SystemLog = require('../models/SystemLog');
 const logger = require('../utils/logger');
+const { logSystemEvent } = logger;
 const zkpService = require('../services/zkpService');
 const blockchainService = require('../services/blockchainService');
-
-// Helper to log system events
-const logSystemEvent = async (level, message, details = '') => {
-  try {
-    await SystemLog.create({
-      level,
-      message,
-      details
-    });
-  } catch (error) {
-    logger.error(`Failed to log event: ${error.message}`);
-  }
-};
 
 // Cast a vote
 exports.castVote = async (req, res, next) => {
