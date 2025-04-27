@@ -233,7 +233,7 @@ export const adminAPI = {
       const response = await api.get('/admin/logs', { params });
       
       // Convert the response format
-      if (response.data && response.data.success) {
+      if (response.data?.success) {
         return {
           success: true,
           data: {
