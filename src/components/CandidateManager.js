@@ -6,6 +6,7 @@ const CandidateManager = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [showInactive, setShowInactive] = useState(true);
   
   // For adding/editing candidate
   const [isEditing, setIsEditing] = useState(false);
@@ -27,6 +28,7 @@ const CandidateManager = () => {
     try {
       const response = await candidateAPI.getAllCandidatesAdmin();
       if (response.success) {
+        console.log('Fetched candidates:', response.data);
         setCandidates(response.data);
       } else {
         setError('Failed to fetch candidates');
@@ -36,6 +38,16 @@ const CandidateManager = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Filter candidates based on showInactive state
+  const filteredCandidates = showInactive 
+    ? candidates 
+    : candidates.filter(candidate => candidate.isActive);
+
+  // Toggle showing inactive candidates
+  const toggleShowInactive = () => {
+    setShowInactive(!showInactive);
   };
 
   // Handle form input changes
@@ -59,7 +71,7 @@ const CandidateManager = () => {
     try {
       // In a real app, we would use a secure admin key
       // For demo purposes, we'll use the JWT token
-      const adminKey = localStorage.getItem('authToken');
+      const adminKey = localStorage.getItem('admin_authToken');
       
       if (!adminKey) {
         console.error('Admin key is missing - authentication token not found');
@@ -77,21 +89,15 @@ const CandidateManager = () => {
       };
       
       // Generate ZK proof
-      try {
-        const proofResult = await zkpUtils.generateAdminActionProof(adminKey, action);
-        
-        if (!proofResult || !proofResult.zkProof) {
-          console.error('Proof generation failed - invalid result', proofResult);
-          setError('ZK proof generation failed: Invalid result from zkpUtils');
-          return null;
-        }
-        
-        return proofResult.zkProof;
-      } catch (proofError) {
-        console.error('Error in proof generation:', proofError);
-        setError(`Failed to generate ZK proof: ${proofError.message}`);
+      const proofResult = await zkpUtils.generateAdminActionProof(adminKey, actionData);
+      
+      if (!proofResult || !proofResult.zkProof) {
+        console.error('Proof generation failed - invalid result', proofResult);
+        setError('ZK proof generation failed: Invalid result from zkpUtils');
         return null;
       }
+      
+      return proofResult.zkProof;
     } catch (error) {
       console.error('Error generating admin proof:', error);
       setError(`Failed to generate ZK proof: ${error.message}`);
@@ -300,14 +306,33 @@ const CandidateManager = () => {
       
       {/* Candidates List */}
       <div className="px-4 py-5 sm:p-6">
-        <h4 className="text-md font-medium text-gray-900 mb-4">Current Candidates</h4>
+        <div className="flex justify-between items-center mb-4">
+          <h4 className="text-md font-medium text-gray-900">Current Candidates</h4>
+          <div className="flex items-center">
+            <button 
+              onClick={fetchCandidates} 
+              className="mr-4 text-sm text-indigo-600 hover:text-indigo-900"
+            >
+              Refresh List
+            </button>
+            <label className="flex items-center text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={showInactive}
+                onChange={toggleShowInactive}
+                className="mr-2 h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+              />
+              Show Inactive Candidates
+            </label>
+          </div>
+        </div>
         
         {loading && candidates.length === 0 ? (
           <div className="text-center py-4">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900" />
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
             <p className="mt-2 text-sm text-gray-500">Loading candidates...</p>
           </div>
-        ) : candidates.length > 0 ? (
+        ) : filteredCandidates.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
@@ -327,8 +352,8 @@ const CandidateManager = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {candidates.map((candidate) => (
-                  <tr key={candidate.candidateId}>
+                {filteredCandidates.map((candidate) => (
+                  <tr key={candidate.candidateId} className={!candidate.isActive ? 'bg-gray-50' : ''}>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                       {candidate.name}
                     </td>
@@ -337,22 +362,33 @@ const CandidateManager = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${candidate.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                        {candidate.isActive ? 'Active' : 'Inactive'}
+                        {candidate.isActive ? 'Active' : 'Inactive (Deleted)'}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <button
-                        onClick={() => handleEdit(candidate)}
-                        className="text-indigo-600 hover:text-indigo-900 mr-4"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDelete(candidate.candidateId)}
-                        className="text-red-600 hover:text-red-900"
-                      >
-                        Remove
-                      </button>
+                      {candidate.isActive ? (
+                        <>
+                          <button
+                            onClick={() => handleEdit(candidate)}
+                            className="text-indigo-600 hover:text-indigo-900 mr-4"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDelete(candidate.candidateId)}
+                            className="text-red-600 hover:text-red-900"
+                          >
+                            Remove
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => handleEdit(candidate)}
+                          className="text-indigo-600 hover:text-indigo-900"
+                        >
+                          Restore
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

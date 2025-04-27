@@ -7,71 +7,62 @@ const logger = require('../utils/logger');
 exports.getSystemLogs = async (req, res, next) => {
   try {
     // Ensure user is admin
-    if (!req.user.isAdmin) {
+    if (!req.user || !req.user.isAdmin) {
       return res.status(403).json({
         success: false,
         message: 'Unauthorized access'
       });
     }
-
+    
+    // Parse query parameters
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 10;
-    const skip = (page - 1) * limit;
     const level = req.query.level;
-    const timeFrame = req.query.timeFrame;
+    const timeFrame = req.query.timeFrame || '24h';
     
-    // Build filter query
-    const filter = {};
+    // Calculate time threshold based on timeFrame
+    let timeThreshold;
+    const now = new Date();
     
-    if (level && ['INFO', 'WARN', 'ERROR'].includes(level)) {
-      filter.level = level;
+    switch(timeFrame) {
+      case '1h':
+        timeThreshold = new Date(now.getTime() - 60 * 60 * 1000);
+        break;
+      case '7d':
+        timeThreshold = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      case '30d':
+        timeThreshold = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        break;
+      default: // 24h is default
+        timeThreshold = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     }
     
-    if (timeFrame) {
-      const now = new Date();
-      let timeAgo = new Date();
-      
-      switch (timeFrame) {
-        case '1h':
-          timeAgo.setHours(now.getHours() - 1);
-          break;
-        case '24h':
-          timeAgo.setDate(now.getDate() - 1);
-          break;
-        case '7d':
-          timeAgo.setDate(now.getDate() - 7);
-          break;
-        case '30d':
-          timeAgo.setDate(now.getDate() - 30);
-          break;
-        default:
-          timeAgo = null;
-      }
-      
-      if (timeAgo) {
-        filter.timestamp = { $gte: timeAgo };
-      }
+    // Build query
+    const query = { timestamp: { $gte: timeThreshold } };
+    if (level) {
+      query.level = level.toUpperCase();
     }
     
-    // Execute query with pagination
-    const logs = await SystemLog.find(filter)
+    // Count total logs for pagination
+    const totalLogs = await SystemLog.countDocuments(query);
+    
+    // Calculate total pages
+    const totalPages = Math.ceil(totalLogs / limit);
+    
+    // Fetch logs with pagination
+    const logs = await SystemLog.find(query)
       .sort({ timestamp: -1 })
-      .skip(skip)
+      .skip((page - 1) * limit)
       .limit(limit);
-      
-    const total = await SystemLog.countDocuments(filter);
     
     res.status(200).json({
       success: true,
-      data: {
-        logs,
-        pagination: {
-          page,
-          limit,
-          total,
-          totalPages: Math.ceil(total / limit)
-        }
-      }
+      logs,
+      currentPage: page,
+      totalPages,
+      totalLogs,
+      limit
     });
   } catch (error) {
     next(error);

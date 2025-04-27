@@ -11,10 +11,24 @@ const api = axios.create({
 // Add a request interceptor to include the token in the headers if it exists
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('authToken');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    // Check for admin token first (admin paths take priority)
+    if (config.url.includes('/admin') || 
+        config.url.includes('/candidates/admin') || 
+        config.url.includes('/system-status') ||
+        config.url.includes('/candidates')) {
+      const adminToken = localStorage.getItem('admin_authToken');
+      if (adminToken) {
+        config.headers.Authorization = `Bearer ${adminToken}`;
+        return config;
+      }
     }
+    
+    // Then check for voter token
+    const voterToken = localStorage.getItem('voter_authToken');
+    if (voterToken) {
+      config.headers.Authorization = `Bearer ${voterToken}`;
+    }
+    
     return config;
   },
   (error) => Promise.reject(error)
@@ -37,15 +51,15 @@ export const authAPI = {
     try {
       const response = await api.post('/auth/login', { hashedIdentifier, zkProof });
       if (response.data.token) {
-        // Store the new auth token
-        localStorage.setItem('authToken', response.data.token);
+        // Store the voter auth token with a voter-specific key
+        localStorage.setItem('voter_authToken', response.data.token);
         
         // Store user identifier (consistent for each user)
-        localStorage.setItem('userIdentifier', hashedIdentifier);
+        localStorage.setItem('voter_userIdentifier', hashedIdentifier);
         
         // Store nullifier hash from the proof to prevent double voting
         if (zkProof.nullifierHash) {
-          localStorage.setItem('nullifierHash', zkProof.nullifierHash);
+          localStorage.setItem('voter_nullifierHash', zkProof.nullifierHash);
         }
         
         // Check if user has already voted (using the consistent identifier)
@@ -54,9 +68,9 @@ export const authAPI = {
         
         // Update global voting status for backward compatibility
         if (hasVoted) {
-          localStorage.setItem('hasVoted', 'true');
+          localStorage.setItem('voter_hasVoted', 'true');
         } else {
-          localStorage.removeItem('hasVoted');
+          localStorage.removeItem('voter_hasVoted');
         }
       }
       return response.data;
@@ -70,8 +84,8 @@ export const authAPI = {
     try {
       const response = await api.post('/auth/admin/login', { username, password });
       if (response.data.token) {
-        localStorage.setItem('authToken', response.data.token);
-        localStorage.setItem('isAdmin', 'true');
+        localStorage.setItem('admin_authToken', response.data.token);
+        localStorage.setItem('admin_isAdmin', 'true');
       }
       return response.data;
     } catch (error) {
@@ -80,38 +94,33 @@ export const authAPI = {
   },
 
   // Logout (clear token from localStorage)
-  logout: () => {
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('isAdmin');
-    localStorage.removeItem('hasVoted');
-    localStorage.removeItem('nullifierHash');
+  logoutVoter: () => {
+    localStorage.removeItem('voter_authToken');
+    localStorage.removeItem('voter_hasVoted');
+    localStorage.removeItem('voter_nullifierHash');
     // Don't remove the user-specific voting records to maintain history
   },
 
-  // Logout admin (clear token from localStorage)
+  // Logout admin
   logoutAdmin: () => {
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('isAdmin');
+    localStorage.removeItem('admin_authToken');
+    localStorage.removeItem('admin_isAdmin');
   },
 
-  // Check if user is authenticated
-  isAuthenticated: () => {
-    return Boolean(localStorage.getItem('authToken'));
+  // Check if voter is authenticated
+  isVoterAuthenticated: () => {
+    return Boolean(localStorage.getItem('voter_authToken'));
   },
 
-  // Check if user is an admin
-  isAdmin: () => {
-    return localStorage.getItem('isAdmin') === 'true';
-  },
-
-  // Check if user is an authenticated admin
+  // Check if admin is authenticated
   isAdminAuthenticated: () => {
-    return Boolean(localStorage.getItem('authToken')) && localStorage.getItem('isAdmin') === 'true';
+    return Boolean(localStorage.getItem('admin_authToken')) && 
+           localStorage.getItem('admin_isAdmin') === 'true';
   },
 
   // Check if current user has voted
   hasVoted: () => {
-    const userIdentifier = localStorage.getItem('userIdentifier');
+    const userIdentifier = localStorage.getItem('voter_userIdentifier');
     if (!userIdentifier) return false;
     
     const userVotedKey = `hasVoted_${userIdentifier}`;
@@ -125,7 +134,7 @@ export const voteAPI = {
   castVote: async (choice, zkProof) => {
     try {
       // Get the nullifier hash from localStorage or from the proof
-      const nullifierHash = localStorage.getItem('nullifierHash') || zkProof.nullifierHash;
+      const nullifierHash = localStorage.getItem('voter_nullifierHash') || zkProof.nullifierHash;
       
       const response = await api.post('/vote/cast', { 
         choice, 
@@ -222,6 +231,20 @@ export const adminAPI = {
       if (timeFrame) params.timeFrame = timeFrame;
       
       const response = await api.get('/admin/logs', { params });
+      
+      // Convert the response format
+      if (response.data && response.data.success) {
+        return {
+          success: true,
+          data: {
+            logs: response.data.logs || [],
+            totalLogs: response.data.totalLogs || response.data.logs?.length || 0,
+            totalPages: response.data.totalPages || Math.ceil((response.data.totalLogs || response.data.logs?.length || 0) / limit),
+            currentPage: response.data.currentPage || page
+          }
+        };
+      }
+      
       return response.data;
     } catch (error) {
       throw error.response?.data || error.message;
@@ -244,25 +267,35 @@ export const zkpUtils = {
   // Generate a proof for authentication
   generateAuthProof: async (identifier) => {
     try {
-      // This would call the zkp-snark library to generate a proof
-      // For demo purposes, we'll just create a mock proof
-      
-      // Hash the identifier first
+      // Hash the identifier first (using a secure algorithm)
       const hashedIdentifier = await hashIdentifier(identifier);
       
-      // Generate a random nullifier secret
-      const nullifierSecret = Math.floor(Math.random() * 1000000).toString();
+      // In a real ZKP system, we would use a zkSNARK library like snarkjs
+      // Here we'll use crypto APIs to create a more realistic simulation
       
-      // Create a mock proof (in a real app, this would use the snarkjs library)
+      // Create a nullifier hash based on the user's identifier and a random salt
+      const salt = crypto.getRandomValues(new Uint8Array(16));
+      const nullifierInput = new TextEncoder().encode(`${hashedIdentifier}-${Array.from(salt).join('')}`);
+      const nullifierBuffer = await crypto.subtle.digest('SHA-256', nullifierInput);
+      const nullifierHash = bufferToHex(nullifierBuffer);
+      
+      // Generate a simulated proof (signature) of the hashedIdentifier
+      // This is a simplified simulation - real ZK proofs would use specialized cryptography
+      const proofInput = new TextEncoder().encode(hashedIdentifier);
+      const proofBuffer = await crypto.subtle.digest('SHA-256', proofInput);
+      const proofA = bufferToHex(proofBuffer).slice(0, 16);
+      const proofB = bufferToHex(proofBuffer).slice(16, 32);
+      const proofC = bufferToHex(proofBuffer).slice(32, 48);
+      
+      // In a real implementation, these would be specialized mathematical structures
       const mockProof = {
         proof: {
-          pi_a: ["mock_pi_a_1", "mock_pi_a_2"],
-          pi_b: [["mock_pi_b_1_1", "mock_pi_b_1_2"], ["mock_pi_b_2_1", "mock_pi_b_2_2"]],
-          pi_c: ["mock_pi_c_1", "mock_pi_c_2"],
+          pi_a: [proofA, proofB],
+          pi_b: [[proofA.slice(0, 8), proofB.slice(0, 8)], [proofA.slice(8), proofB.slice(8)]],
+          pi_c: [proofC, proofC.split('').reverse().join('')]
         },
         publicSignals: [hashedIdentifier],
-        // Add a nullifier hash to prevent double voting
-        nullifierHash: await hashString(`nullifier-${hashedIdentifier}-${Date.now()}`)
+        nullifierHash
       };
       
       return {
@@ -277,18 +310,29 @@ export const zkpUtils = {
   // Generate a proof for voting
   generateVoteProof: async (identifier, choice) => {
     try {
-      // Similar mock implementation as above
-      // In a real app, this would use the snarkjs library
-      
       const hashedIdentifier = await hashIdentifier(identifier);
-      const nullifierHash = await hashString(`nullifier-${hashedIdentifier}-${Date.now()}`);
-      const choiceHash = await hashString(choice);
+      
+      // Create a deterministic nullifier hash based on the user's identifier
+      // In a real ZKP system, this would be derived from a private input
+      const nullifierInput = new TextEncoder().encode(`nullifier-${hashedIdentifier}`);
+      const nullifierBuffer = await crypto.subtle.digest('SHA-256', nullifierInput);
+      const nullifierHash = bufferToHex(nullifierBuffer);
+      
+      // Create a hash of the vote choice
+      const choiceInput = new TextEncoder().encode(choice);
+      const choiceBuffer = await crypto.subtle.digest('SHA-256', choiceInput);
+      const choiceHash = bufferToHex(choiceBuffer);
+      
+      // Generate simulated proof components
+      const proofSeed = new TextEncoder().encode(`${nullifierHash}:${choiceHash}`);
+      const proofBuffer = await crypto.subtle.digest('SHA-256', proofSeed);
+      const proofHex = bufferToHex(proofBuffer);
       
       const mockProof = {
         proof: {
-          pi_a: ["mock_vote_pi_a_1", "mock_vote_pi_a_2"],
-          pi_b: [["mock_vote_pi_b_1_1", "mock_vote_pi_b_1_2"], ["mock_vote_pi_b_2_1", "mock_vote_pi_b_2_2"]],
-          pi_c: ["mock_vote_pi_c_1", "mock_vote_pi_c_2"],
+          pi_a: [proofHex.slice(0, 16), proofHex.slice(16, 32)],
+          pi_b: [[proofHex.slice(0, 8), proofHex.slice(8, 16)], [proofHex.slice(16, 24), proofHex.slice(24, 32)]],
+          pi_c: [proofHex.slice(32, 48), proofHex.slice(48, 64)],
         },
         publicSignals: [nullifierHash, choiceHash],
       };
@@ -306,33 +350,35 @@ export const zkpUtils = {
   // Generate a proof for admin actions
   generateAdminActionProof: async (adminKey, actionData) => {
     try {
-      // In a real app, this would use the snarkjs library
-      // with the admin circuit to generate a proof
+      // Create a nonce for this specific action (timestamp + random bytes)
+      const randomBytes = crypto.getRandomValues(new Uint8Array(8));
+      const actionNonce = Date.now().toString() + Array.from(randomBytes).join('');
       
-      // Create a nonce for this specific action
-      const actionNonce = Date.now().toString();
+      // Create an action hash by hashing the action data with the nonce
+      const actionString = JSON.stringify(actionData);
+      const actionInput = new TextEncoder().encode(`${actionString}-${actionNonce}`);
+      const actionBuffer = await crypto.subtle.digest('SHA-256', actionInput);
+      const actionHash = bufferToHex(actionBuffer);
       
-      // Generate mock proof for admin action
-      let actionString;
-      if (typeof actionData === 'string') {
-        // If actionData is just a string (like 'add', 'update', 'delete')
-        actionString = actionData;
-      } else {
-        // If actionData is an object with details
-        actionString = JSON.stringify(actionData);
-      }
+      // Create an admin proof by hashing the admin key
+      // In a real system, this would be a ZK proof that the admin has authorization
+      const adminInput = new TextEncoder().encode(adminKey);
+      const adminBuffer = await crypto.subtle.digest('SHA-256', adminInput);
+      const adminProof = bufferToHex(adminBuffer);
       
-      const actionHash = await hashString(`${actionString}-${actionNonce}`);
-      const adminProof = await hashString(adminKey);
+      // Generate the proof components from a combination of admin proof and action
+      const proofSeed = new TextEncoder().encode(`${adminProof}:${actionHash}`);
+      const proofBuffer = await crypto.subtle.digest('SHA-256', proofSeed);
+      const proofHex = bufferToHex(proofBuffer);
       
       const mockProof = {
         proof: {
-          pi_a: ["mock_admin_pi_a_1", "mock_admin_pi_a_2"],
-          pi_b: [["mock_admin_pi_b_1_1", "mock_admin_pi_b_1_2"], ["mock_admin_pi_b_2_1", "mock_admin_pi_b_2_2"]],
-          pi_c: ["mock_admin_pi_c_1", "mock_admin_pi_c_2"],
+          pi_a: [proofHex.slice(0, 16), proofHex.slice(16, 32)],
+          pi_b: [[proofHex.slice(0, 8), proofHex.slice(8, 16)], [proofHex.slice(16, 24), proofHex.slice(24, 32)]],
+          pi_c: [proofHex.slice(32, 48), proofHex.slice(48, 64)],
         },
         publicSignals: [adminProof, actionHash],
-        actionNonce: actionNonce
+        actionNonce
       };
       
       return {
@@ -346,22 +392,37 @@ export const zkpUtils = {
   }
 };
 
-// Helper function to hash a string
+// Helper function to convert buffer to hex string
+const bufferToHex = (buffer) => {
+  return Array.from(new Uint8Array(buffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+};
+
+// Helper function to hash a string securely
 export const hashString = async (str) => {
-  // In a real application, we would use a crypto library
-  // For simplicity, we'll create a simple hash function
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
+  try {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(str);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    return bufferToHex(hashBuffer);
+  } catch (error) {
+    console.error('Fallback to simple hashing due to error:', error);
+    
+    // Fallback hashing if Web Crypto API is not available
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    return hash.toString(16);
   }
-  return hash.toString(16);
 };
 
 // Helper function to hash an identifier
 export const hashIdentifier = async (identifier) => {
-  return hashString(`zk-auth-${identifier}`);
+  return hashString(`zk-auth-${identifier}-v2`);
 };
 
 export default api; 

@@ -1,22 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { voteAPI, zkpUtils, authAPI } from '../utils/api';
+import { voteAPI, zkpUtils, authAPI, candidateAPI } from '../utils/api';
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const [hasVoted, setHasVoted] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [candidates, setCandidates] = useState([]);
+  const [loadingCandidates, setLoadingCandidates] = useState(true);
 
   // Check if user is authenticated and hasn't voted already
   useEffect(() => {
-    if (!authAPI.isAuthenticated()) {
+    if (!authAPI.isVoterAuthenticated()) {
       navigate('/');
       return;
     }
     
     // Get user identifier
-    const userIdentifier = localStorage.getItem('userIdentifier');
+    const userIdentifier = localStorage.getItem('voter_userIdentifier');
     if (!userIdentifier) {
       console.error('User identifier missing');
       return;
@@ -30,11 +32,43 @@ const Dashboard = () => {
       setHasVoted(true);
       setStatusMessage('You have already cast your vote in this election.');
     }
+
+    // Fetch candidates from the API
+    const fetchCandidates = async () => {
+      setLoadingCandidates(true);
+      try {
+        const response = await candidateAPI.getCandidates();
+        if (response.success && response.data) {
+          setCandidates(response.data);
+        } else {
+          // If no candidates are found, show default candidates as fallback
+          setCandidates([
+            { candidateId: 'default-1', name: 'Candidate A', description: 'Policy focus: Economy' },
+            { candidateId: 'default-2', name: 'Candidate B', description: 'Policy focus: Healthcare' },
+            { candidateId: 'default-3', name: 'Candidate C', description: 'Policy focus: Education' },
+            { candidateId: 'default-4', name: 'Abstain', description: 'I choose not to vote' }
+          ]);
+        }
+      } catch (error) {
+        console.error('Error fetching candidates:', error);
+        // Fallback to default candidates in case of error
+        setCandidates([
+          { candidateId: 'default-1', name: 'Candidate A', description: 'Policy focus: Economy' },
+          { candidateId: 'default-2', name: 'Candidate B', description: 'Policy focus: Healthcare' },
+          { candidateId: 'default-3', name: 'Candidate C', description: 'Policy focus: Education' },
+          { candidateId: 'default-4', name: 'Abstain', description: 'I choose not to vote' }
+        ]);
+      } finally {
+        setLoadingCandidates(false);
+      }
+    };
+
+    fetchCandidates();
   }, [navigate]);
 
-  const handleVote = async (option) => {
+  const handleVote = async (candidateName) => {
     // Get user identifier
-    const userIdentifier = localStorage.getItem('userIdentifier');
+    const userIdentifier = localStorage.getItem('voter_userIdentifier');
     if (!userIdentifier) {
       setStatusMessage('Error: User identifier missing. Please log in again.');
       return;
@@ -54,16 +88,16 @@ const Dashboard = () => {
     
     try {
       // Generate a zk-SNARK proof for voting using the identifier and choice
-      const { zkProof } = await zkpUtils.generateVoteProof(userIdentifier, option);
+      const { zkProof } = await zkpUtils.generateVoteProof(userIdentifier, candidateName);
       
       // Cast the vote via API
-      const result = await voteAPI.castVote(option, zkProof);
+      const result = await voteAPI.castVote(candidateName, zkProof);
       
       // Mark as voted both in state and localStorage for this specific user
       setHasVoted(true);
       localStorage.setItem(userVotedKey, 'true');
       
-      setStatusMessage(`Your vote for "${option}" has been recorded anonymously.`);
+      setStatusMessage(`Your vote for "${candidateName}" has been recorded anonymously.`);
       
       // If the vote was recorded on the blockchain, show the transaction hash
       if (result.transactionHash) {
@@ -77,7 +111,7 @@ const Dashboard = () => {
   };
 
   const handleLogout = () => {
-    authAPI.logout();
+    authAPI.logoutVoter();
     navigate('/');
   };
 
@@ -111,45 +145,31 @@ const Dashboard = () => {
               </p>
             </div>
             
-            {!hasVoted ? (
+            {loadingCandidates ? (
+              <div className="flex justify-center items-center h-40">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
+              </div>
+            ) : !hasVoted ? (
               <div>
                 <h3 className="text-lg font-medium mb-3">Cast Your Vote</h3>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <button
-                    onClick={() => handleVote('Candidate A')}
-                    className="px-4 py-6 border border-gray-300 rounded-md shadow-sm text-center hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-                    disabled={isLoading}
-                  >
-                    <span className="block text-lg font-medium text-gray-900">Candidate A</span>
-                    <span className="block mt-1 text-sm text-gray-500">Policy focus: Economy</span>
-                  </button>
+                  {candidates.map(candidate => (
+                    <button
+                      key={candidate.candidateId}
+                      onClick={() => handleVote(candidate.name)}
+                      className="px-4 py-6 border border-gray-300 rounded-md shadow-sm text-center hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
+                      disabled={isLoading}
+                    >
+                      <span className="block text-lg font-medium text-gray-900">{candidate.name}</span>
+                      <span className="block mt-1 text-sm text-gray-500">{candidate.description}</span>
+                    </button>
+                  ))}
                   
-                  <button
-                    onClick={() => handleVote('Candidate B')}
-                    className="px-4 py-6 border border-gray-300 rounded-md shadow-sm text-center hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-                    disabled={isLoading}
-                  >
-                    <span className="block text-lg font-medium text-gray-900">Candidate B</span>
-                    <span className="block mt-1 text-sm text-gray-500">Policy focus: Healthcare</span>
-                  </button>
-                  
-                  <button
-                    onClick={() => handleVote('Candidate C')}
-                    className="px-4 py-6 border border-gray-300 rounded-md shadow-sm text-center hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-                    disabled={isLoading}
-                  >
-                    <span className="block text-lg font-medium text-gray-900">Candidate C</span>
-                    <span className="block mt-1 text-sm text-gray-500">Policy focus: Education</span>
-                  </button>
-                  
-                  <button
-                    onClick={() => handleVote('Abstain')}
-                    className="px-4 py-6 border border-gray-300 rounded-md shadow-sm text-center hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-                    disabled={isLoading}
-                  >
-                    <span className="block text-lg font-medium text-gray-900">Abstain</span>
-                    <span className="block mt-1 text-sm text-gray-500">I choose not to vote</span>
-                  </button>
+                  {candidates.length === 0 && (
+                    <div className="col-span-2 p-6 text-center border border-yellow-300 bg-yellow-50 rounded-md">
+                      <p className="text-yellow-700">No candidates available for this election. Please contact an administrator.</p>
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (
