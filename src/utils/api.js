@@ -90,7 +90,7 @@ export const authAPI = {
 
   // Check if user is authenticated
   isAuthenticated: () => {
-    return !!localStorage.getItem('authToken');
+    return Boolean(localStorage.getItem('authToken'));
   },
 
   // Check if user is an admin
