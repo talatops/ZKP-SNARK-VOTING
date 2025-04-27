@@ -77,15 +77,21 @@ const CandidateManager = () => {
       };
       
       // Generate ZK proof
-      const proofResult = await zkpUtils.generateAdminActionProof(adminKey, actionData);
-      
-      if (!proofResult || !proofResult.zkProof) {
-        console.error('Proof generation failed - invalid result', proofResult);
-        setError('ZK proof generation failed: Invalid result from zkpUtils');
+      try {
+        const proofResult = await zkpUtils.generateAdminActionProof(adminKey, action);
+        
+        if (!proofResult || !proofResult.zkProof) {
+          console.error('Proof generation failed - invalid result', proofResult);
+          setError('ZK proof generation failed: Invalid result from zkpUtils');
+          return null;
+        }
+        
+        return proofResult.zkProof;
+      } catch (proofError) {
+        console.error('Error in proof generation:', proofError);
+        setError(`Failed to generate ZK proof: ${proofError.message}`);
         return null;
       }
-      
-      return proofResult.zkProof;
     } catch (error) {
       console.error('Error generating admin proof:', error);
       setError(`Failed to generate ZK proof: ${error.message}`);

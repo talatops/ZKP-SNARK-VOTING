@@ -88,6 +88,12 @@ export const authAPI = {
     // Don't remove the user-specific voting records to maintain history
   },
 
+  // Logout admin (clear token from localStorage)
+  logoutAdmin: () => {
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('isAdmin');
+  },
+
   // Check if user is authenticated
   isAuthenticated: () => {
     return Boolean(localStorage.getItem('authToken'));
@@ -96,6 +102,11 @@ export const authAPI = {
   // Check if user is an admin
   isAdmin: () => {
     return localStorage.getItem('isAdmin') === 'true';
+  },
+
+  // Check if user is an authenticated admin
+  isAdminAuthenticated: () => {
+    return Boolean(localStorage.getItem('authToken')) && localStorage.getItem('isAdmin') === 'true';
   },
 
   // Check if current user has voted
@@ -302,7 +313,15 @@ export const zkpUtils = {
       const actionNonce = Date.now().toString();
       
       // Generate mock proof for admin action
-      const actionString = JSON.stringify(actionData);
+      let actionString;
+      if (typeof actionData === 'string') {
+        // If actionData is just a string (like 'add', 'update', 'delete')
+        actionString = actionData;
+      } else {
+        // If actionData is an object with details
+        actionString = JSON.stringify(actionData);
+      }
+      
       const actionHash = await hashString(`${actionString}-${actionNonce}`);
       const adminProof = await hashString(adminKey);
       
