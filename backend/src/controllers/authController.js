@@ -81,7 +81,7 @@ exports.authenticateVoter = async (req, res, next) => {
     }
 
     // Verify the zero-knowledge proof
-    const isProofValid = await zkpService.verifyProof(zkProof, hashedIdentifier);
+    const isProofValid = await zkpService.verifyProof(zkProof.proof, zkProof.publicSignals);
 
     if (!isProofValid) {
       await logSystemEvent('WARN', 'Failed login attempt', 'Invalid proof provided');
@@ -93,7 +93,7 @@ exports.authenticateVoter = async (req, res, next) => {
 
     // Generate JWT token
     const token = jwt.sign(
-      { nullifierHash: zkProof.nullifierHash },
+      { nullifierHash: zkProof.publicSignals?.[1] || zkProof.nullifierHash },
       process.env.JWT_SECRET || 'your-secret-key',
       { expiresIn: '1h' }
     );

@@ -10,13 +10,17 @@
     "tailwindcss": "^3.3.3",
     "postcss": "^8.4.31",
     "autoprefixer": "^10.4.16",
-    "axios": "^1.5.0"
+    "axios": "^1.5.0",
+    "snarkjs": "^0.7.0"
   },
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "compile-circuits": "node circuits/compile-circuits.js",
+    "setup-zkp": "npm run compile-circuits && npm run copy-circuit-artifacts",
+    "copy-circuit-artifacts": "mkdir -p public/circuits && cp -r circuits/*/verification_key.json circuits/*/*.wasm circuits/*/*_final.zkey public/circuits/"
   },
   "eslintConfig": {
     "extends": [
@@ -40,6 +44,8 @@
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",
     "@testing-library/user-event": "^13.5.0",
-    "web-vitals": "^2.1.4"
+    "web-vitals": "^2.1.4",
+    "circomlib": "^2.0.5",
+    "circom": "^0.5.46"
   }
 } 
