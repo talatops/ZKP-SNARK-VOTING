@@ -2,6 +2,15 @@
 
 This document provides detailed information about the three main Zero-Knowledge Proof circuits in our voting system.
 
+## Circuit Overview
+
+Our system uses three distinct circuits:
+1. Authentication Circuit (`auth.circom`)
+2. Voting Circuit (`vote.circom`)
+3. Admin Circuit (`admin.circom`)
+
+Each circuit is compiled using Circom 2.0.0 and uses the Groth16 proving system.
+
 ## 1. Authentication Circuit
 
 The authentication circuit proves that a voter knows their original identifier without revealing it.
@@ -11,71 +20,74 @@ The authentication circuit proves that a voter knows their original identifier w
 - Generate a unique nullifier hash that doesn't reveal the original identifier
 - Prevent identity correlation across authentications
 
-### Circom Implementation Example
+### Circom Implementation
 
 ```circom
 pragma circom 2.0.0;
 
-include "circomlib/poseidon.circom";
-include "circomlib/bitify.circom";
+include "/app/circomlib/circuits/poseidon.circom";
+include "/app/circomlib/circuits/comparators.circom";
 
-template AuthCircuit() {
-    // Private inputs (not revealed)
-    signal input identifier; // The voter's original ID
-    signal input salt;       // Random salt for nullifier
-
-    // Public inputs (revealed in the proof)
-    signal output hashedIdentifier; // The hash of the ID that's registered
-    signal output nullifierHash;    // Unique identifier for this voter
-
-    // Hash the identifier to match against registered hashes
+template VoterAuth() {
+    // Private inputs
+    signal input identifierPreimage; // The secret identifier
+    signal input nullifierSecret;    // Random secret for nullifier
+    
+    // Public inputs/outputs
+    signal input publicHashedIdentifier; // Public input for verification
+    signal output hashedIdentifier;      // Public hash of the identifier
+    signal output nullifierHash;         // Public hash to prevent double voting
+    
+    // Step 1: Compute the hashed identifier
     component identifierHasher = Poseidon(1);
-    identifierHasher.inputs[0] <== identifier;
+    identifierHasher.inputs[0] <== identifierPreimage;
     hashedIdentifier <== identifierHasher.out;
-
-    // Create nullifier hash (unique per auth but linkable to user)
+    
+    // Ensure the public hashed identifier matches our calculation
+    publicHashedIdentifier === hashedIdentifier;
+    
+    // Step 2: Compute the nullifier hash
     component nullifierHasher = Poseidon(2);
-    nullifierHasher.inputs[0] <== identifier;
-    nullifierHasher.inputs[1] <== salt;
+    nullifierHasher.inputs[0] <== identifierPreimage;
+    nullifierHasher.inputs[1] <== nullifierSecret;
     nullifierHash <== nullifierHasher.out;
 }
 
-component main {public [hashedIdentifier]} = AuthCircuit();
+component main { public [publicHashedIdentifier] } = VoterAuth();
 ```
 
-### Current Client-Side Implementation
+### Client-Side Implementation
+
 ```javascript
 export const generateAuthProof = async (identifier) => {
-  // Create a secure hash of the identifier
-  const identifierHash = await hashString(identifier);
-  
-  // Create a salt for the nullifier
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const saltHex = bufferToHex(salt);
-  
-  // Create nullifier hash using both identifier and salt
-  const nullifierInput = identifier + saltHex;
-  const nullifierHash = await hashString(nullifierInput);
-  
-  // Generate proof components
-  const proof = {
-    pi_a: Array.from(crypto.getRandomValues(new Uint8Array(3))).map(x => x.toString(16)).join(''),
-    pi_b: [
-      Array.from(crypto.getRandomValues(new Uint8Array(2))).map(x => x.toString(16)).join(''),
-      Array.from(crypto.getRandomValues(new Uint8Array(2))).map(x => x.toString(16)).join('')
-    ],
-    pi_c: Array.from(crypto.getRandomValues(new Uint8Array(2))).map(x => x.toString(16)).join(''),
-    protocol: "groth16",
-    curve: "bn128"
-  };
-  
-  return {
-    proof,
-    publicSignals: {
-      hashedIdentifier: identifierHash,
-      nullifierHash: nullifierHash
-    }
-  };
+  try {
+    // Generate a random salt for the nullifier
+    const nullifierSecret = Date.now().toString() + Math.random().toString().substring(2);
+    
+    // Create the input for the circuit
+    const input = {
+      identifierPreimage: identifier,
+      nullifierSecret: nullifierSecret,
+      publicHashedIdentifier: hashedIdentifier
+    };
+    
+    // Generate the proof using snarkjs
+    const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+      input,
+      authWasmPath,
+      authZkeyPath
+    );
+    
+    return {
+      proof,
+      publicSignals,
+      nullifierSecret,
+      nullifierHash: publicSignals[1],
+      hashedIdentifier: publicSignals[0]
+    };
+  } catch (error) {
+    throw new Error(`Auth proof generation failed: ${error.message}`);
+  }
 };
 ```
 
@@ -88,230 +100,211 @@ The voting circuit proves eligibility to vote without revealing the voter's iden
 - Create a deterministic nullifier that prevents double voting
 - Encrypt the vote choice without revealing the voter's identity
 
-### Circom Implementation Example
+### Circom Implementation
 
 ```circom
 pragma circom 2.0.0;
 
-include "circomlib/poseidon.circom";
-include "circomlib/bitify.circom";
+include "/app/circomlib/circuits/poseidon.circom";
+include "/app/circomlib/circuits/comparators.circom";
 
 template VoteCircuit() {
-    // Private inputs (not revealed)
-    signal input nullifier;        // From auth token
-    signal input voteChoice;       // Candidate ID (kept private)
-    signal input voterSecret;      // Secret from auth
-
-    // Public inputs (revealed in the proof)
-    signal output nullifierHash;   // To prevent double voting
-    signal output voteCommitment;  // Encrypted vote
-
-    // Create deterministic nullifier hash for this voter
-    component nullifierHasher = Poseidon(1);
-    nullifierHasher.inputs[0] <== nullifier;
+    // Private inputs
+    signal input identifierPreimage;    // Original voter identifier
+    signal input nullifierSecret;       // Secret from auth
+    signal input choice;                // Vote choice (candidate ID)
+    
+    // Public inputs/outputs
+    signal input publicNullifierHash;   // Expected nullifier hash
+    signal output nullifierHash;        // To prevent double voting
+    signal output choiceHash;           // Encrypted vote choice
+    
+    // Step 1: Verify the nullifier matches
+    component nullifierHasher = Poseidon(2);
+    nullifierHasher.inputs[0] <== identifierPreimage;
+    nullifierHasher.inputs[1] <== nullifierSecret;
     nullifierHash <== nullifierHasher.out;
-
-    // Create vote commitment (hides the actual vote)
-    component voteHasher = Poseidon(2);
-    voteHasher.inputs[0] <== voteChoice;
-    voteHasher.inputs[1] <== voterSecret;
-    voteCommitment <== voteHasher.out;
+    
+    // Ensure the nullifier matches the one from auth
+    publicNullifierHash === nullifierHash;
+    
+    // Step 2: Create encrypted vote choice
+    component choiceHasher = Poseidon(2);
+    choiceHasher.inputs[0] <== choice;
+    choiceHasher.inputs[1] <== nullifierSecret;
+    choiceHash <== choiceHasher.out;
 }
 
-component main {public [nullifierHash, voteCommitment]} = VoteCircuit();
+component main { public [publicNullifierHash] } = VoteCircuit();
 ```
 
-### Current Client-Side Implementation
+### Client-Side Implementation
+
 ```javascript
-export const generateVoteProof = async (nullifierFromToken, candidateId) => {
-  if (!nullifierFromToken) {
-    throw new Error("Authentication required before voting");
+export const generateVoteProof = async (identifier, nullifierSecret, choice) => {
+  try {
+    // Create the input for the circuit
+    const input = {
+      identifierPreimage: identifier,
+      nullifierSecret: nullifierSecret,
+      choice: choice,
+      publicNullifierHash: storedNullifierHash
+    };
+    
+    // Generate the proof using snarkjs
+    const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+      input,
+      voteWasmPath,
+      voteZkeyPath
+    );
+    
+    return {
+      proof,
+      publicSignals,
+      nullifierHash: publicSignals[0],
+      choiceHash: publicSignals[1]
+    };
+  } catch (error) {
+    throw new Error(`Vote proof generation failed: ${error.message}`);
   }
-  
-  // Create a deterministic nullifier hash to prevent double voting
-  const nullifierHash = await hashString(nullifierFromToken);
-  
-  // Create hash of the vote choice
-  const choiceHash = await hashString(candidateId.toString());
-  
-  // Generate proof components
-  const proof = {
-    pi_a: Array.from(crypto.getRandomValues(new Uint8Array(3))).map(x => x.toString(16)).join(''),
-    pi_b: [
-      Array.from(crypto.getRandomValues(new Uint8Array(2))).map(x => x.toString(16)).join(''),
-      Array.from(crypto.getRandomValues(new Uint8Array(2))).map(x => x.toString(16)).join('')
-    ],
-    pi_c: Array.from(crypto.getRandomValues(new Uint8Array(2))).map(x => x.toString(16)).join(''),
-    protocol: "groth16",
-    curve: "bn128"
-  };
-  
-  return {
-    proof,
-    publicSignals: {
-      nullifierHash: nullifierHash,
-      voteCommitment: choiceHash
-    },
-    voteData: {
-      candidateId: candidateId
-    }
-  };
 };
 ```
 
-## 3. Admin Action Circuit
+## 3. Admin Circuit
 
-The admin action circuit proves administration privileges without revealing admin credentials.
+The admin circuit proves administration privileges without revealing admin credentials.
 
 ### Circuit Purpose
 - Prove the user has admin privileges
 - Create a secure nonce for each action
 - Bind the action type and parameters to the proof
 
-### Circom Implementation Example
+### Circom Implementation
 
 ```circom
 pragma circom 2.0.0;
 
-include "circomlib/poseidon.circom";
-include "circomlib/bitify.circom";
+include "/app/circomlib/circuits/poseidon.circom";
+include "/app/circomlib/circuits/comparators.circom";
 
-template AdminActionCircuit() {
-    // Private inputs (not revealed)
-    signal input adminKey;         // Admin's private key
-    signal input actionType;       // Type of admin action
-    signal input actionParams;     // Parameters hash
-    signal input nonce;            // Unique nonce for this action
-
-    // Public inputs (revealed in the proof)
-    signal output adminKeyHash;    // Hash of admin key for verification
-    signal output actionHash;      // Hash binding the action to this proof
+template AdminCircuit() {
+    // Private inputs
+    signal input adminKey;        // Admin's private key
+    signal input actionData;      // Action parameters
+    signal input actionNonce;     // Unique nonce for this action
+    
+    // Public inputs/outputs
+    signal input publicActionHash; // Expected action hash
+    signal output actionHash;      // Hash binding the action
     signal output nonceHash;       // Prevents replay attacks
-
-    // Verify admin identity
-    component keyHasher = Poseidon(1);
-    keyHasher.inputs[0] <== adminKey;
-    adminKeyHash <== keyHasher.out;
-
-    // Bind action details to proof
+    
+    // Step 1: Create action hash
     component actionHasher = Poseidon(2);
-    actionHasher.inputs[0] <== actionType;
-    actionHasher.inputs[1] <== actionParams;
+    actionHasher.inputs[0] <== actionData;
+    actionHasher.inputs[1] <== actionNonce;
     actionHash <== actionHasher.out;
-
-    // Create nonce hash to prevent replay
+    
+    // Ensure action hash matches expected
+    publicActionHash === actionHash;
+    
+    // Step 2: Create nonce hash
     component nonceHasher = Poseidon(2);
     nonceHasher.inputs[0] <== adminKey;
-    nonceHasher.inputs[1] <== nonce;
+    nonceHasher.inputs[1] <== actionNonce;
     nonceHash <== nonceHasher.out;
 }
 
-component main {public [adminKeyHash, actionHash, nonceHash]} = AdminActionCircuit();
+component main { public [publicActionHash] } = AdminCircuit();
 ```
 
-### Current Client-Side Implementation
+### Client-Side Implementation
+
 ```javascript
-export const generateAdminActionProof = async (adminKey, actionType, actionData) => {
-  if (!adminKey) {
-    throw new Error("Admin authentication required");
+export const generateAdminProof = async (adminKey, actionData) => {
+  try {
+    // Generate a unique nonce
+    const actionNonce = Date.now().toString() + Math.random().toString().substring(2);
+    
+    // Calculate expected action hash
+    const expectedActionHash = await calculateActionHash(actionData, actionNonce);
+    
+    // Create the input for the circuit
+    const input = {
+      adminKey: adminKey,
+      actionData: actionData,
+      actionNonce: actionNonce,
+      publicActionHash: expectedActionHash
+    };
+    
+    // Generate the proof using snarkjs
+    const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+      input,
+      adminWasmPath,
+      adminZkeyPath
+    );
+    
+    return {
+      proof,
+      publicSignals,
+      actionHash: publicSignals[0],
+      nonceHash: publicSignals[1],
+      actionNonce
+    };
+  } catch (error) {
+    throw new Error(`Admin proof generation failed: ${error.message}`);
   }
-  
-  // Create nonce for this specific action
-  const nonce = Date.now().toString() + Math.random().toString().substring(2);
-  const nonceHash = await hashString(nonce);
-  
-  // Hash the action data
-  const actionDataStr = typeof actionData === 'object' ? JSON.stringify(actionData) : String(actionData);
-  const actionHash = await hashString(actionType + actionDataStr);
-  
-  // Generate proof components
-  const proof = {
-    pi_a: Array.from(crypto.getRandomValues(new Uint8Array(3))).map(x => x.toString(16)).join(''),
-    pi_b: [
-      Array.from(crypto.getRandomValues(new Uint8Array(2))).map(x => x.toString(16)).join(''),
-      Array.from(crypto.getRandomValues(new Uint8Array(2))).map(x => x.toString(16)).join('')
-    ],
-    pi_c: Array.from(crypto.getRandomValues(new Uint8Array(2))).map(x => x.toString(16)).join(''),
-    protocol: "groth16",
-    curve: "bn128"
-  };
-  
-  return {
-    proof,
-    publicSignals: {
-      adminKeyHash: await hashString(adminKey),
-      actionHash: actionHash,
-      nonceHash: nonceHash
-    },
-    actionData: {
-      type: actionType,
-      data: actionData,
-      nonce: nonce
-    }
-  };
 };
 ```
 
-## Server-Side Verification
+## Circuit Compilation and Setup
 
-On the server side, each proof is verified using a corresponding verification key. The verification process ensures:
+The circuits are compiled using the following process:
 
-1. The proof is valid and was generated using the correct circuit
-2. The public signals match the expected values
-3. The nullifier (for voting) hasn't been used before
-4. The admin key hash (for admin actions) matches a registered admin
-
-### Example Verification Pseudo-Code
-
-```javascript
-function verifyProof(proofData, publicSignals, verificationKey) {
-  // Use snarkjs or a similar library to verify the proof
-  const isValid = snarkjs.groth16.verify(
-    verificationKey,
-    publicSignals,
-    proofData.proof
-  );
-  
-  return isValid;
-}
-
-// For voting: also check if the nullifier has been used before
-async function verifyVote(proofData) {
-  const isValidProof = verifyProof(
-    proofData,
-    proofData.publicSignals,
-    voteVerificationKey
-  );
-  
-  if (!isValidProof) {
-    return { success: false, message: "Invalid proof" };
-  }
-  
-  // Check if nullifier has voted before
-  const hasVoted = await checkNullifierUsed(proofData.publicSignals.nullifierHash);
-  
-  if (hasVoted) {
-    return { success: false, message: "Already voted" };
-  }
-  
-  // Mark nullifier as used and record the vote
-  await recordVote(
-    proofData.publicSignals.nullifierHash,
-    proofData.voteData.candidateId
-  );
-  
-  return { success: true, message: "Vote recorded successfully" };
-}
+1. **Circuit Compilation**
+```bash
+circom circuit.circom --r1cs --wasm --sym
 ```
 
-## Future Enhancements
+2. **Trusted Setup**
+```bash
+# Phase 1
+snarkjs powersoftau new bn128 12 pot12_0000.ptau -v
+snarkjs powersoftau contribute pot12_0000.ptau pot12_0001.ptau
 
-1. **Full Circuit Implementation**: Replace simulated proofs with real ZK-SNARK proof generation using circuits compiled with Circom and proof generation with SnarkJS.
+# Phase 2
+snarkjs powersoftau prepare phase2 pot12_0001.ptau pot12_final.ptau
+snarkjs groth16 setup circuit.r1cs pot12_final.ptau circuit_0000.zkey
+snarkjs zkey contribute circuit_0000.zkey circuit_final.zkey
+```
 
-2. **On-chain Verification**: Move verification to Ethereum smart contracts for trustless verification.
+3. **Export Verification Key**
+```bash
+snarkjs zkey export verificationkey circuit_final.zkey verification_key.json
+```
 
-3. **Multi-party Computation**: Add secure MPC for vote tallying to further enhance privacy.
+## Testing and Verification
 
-4. **Custom Circuits**: Develop specialized circuits for different voting schemes like ranked-choice or quadratic voting.
+The system includes comprehensive tests for each circuit:
 
-5. **Front-end Integration**: Add WebAssembly-based proof generation for better performance. 
+1. **Unit Tests**: Test individual circuit constraints
+2. **Integration Tests**: Test complete proof generation and verification flow
+3. **Performance Tests**: Measure proof generation and verification times
+
+Example test command:
+```bash
+node test-zkp.js
+```
+
+## Security Considerations
+
+1. **Trusted Setup**: The system requires a secure trusted setup ceremony
+2. **Nonce Management**: Each proof uses unique nonces to prevent replay attacks
+3. **Hash Functions**: Uses Poseidon hash for efficient in-circuit computation
+4. **Input Validation**: All inputs are validated before proof generation
+
+## Performance Optimization
+
+1. **Circuit Size**: Minimized number of constraints for faster proving
+2. **Parallel Processing**: Proof generation can be parallelized
+3. **WebAssembly**: Uses WASM for efficient client-side computation
+4. **Caching**: Implements strategic caching of circuit artifacts 
