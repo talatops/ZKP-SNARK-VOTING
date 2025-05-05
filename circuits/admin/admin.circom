@@ -1,7 +1,7 @@
 pragma circom 2.0.0;
 
-include "../../node_modules/circomlib/circuits/poseidon.circom";
-include "../../node_modules/circomlib/circuits/comparators.circom";
+include "/app/circomlib/circuits/poseidon.circom";
+include "/app/circomlib/circuits/comparators.circom";
 
 /*
  * Circuit for admin actions (candidate management)
@@ -17,6 +17,7 @@ template AdminAction() {
     
     // Public inputs/outputs
     signal output adminProof;     // Public proof of admin authority
+    signal input publicActionHash; // This will be the public input that matches actionHash
     signal output actionHash;     // Public hash of the action data
     
     // Step 1: Compute the admin proof
@@ -31,6 +32,9 @@ template AdminAction() {
     actionHasher.inputs[1] <== actionData;
     actionHasher.inputs[2] <== actionNonce;
     actionHash <== actionHasher.out;
+    
+    // Ensure the public action hash matches our calculated hash
+    publicActionHash === actionHash;
 }
 
-component main { public [actionHash] } = AdminAction(); 
+component main { public [publicActionHash] } = AdminAction(); 

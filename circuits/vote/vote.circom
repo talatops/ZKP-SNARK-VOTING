@@ -1,8 +1,8 @@
 pragma circom 2.0.0;
 
-include "../../node_modules/circomlib/circuits/poseidon.circom";
-include "../../node_modules/circomlib/circuits/bitify.circom";
-include "../../node_modules/circomlib/circuits/comparators.circom";
+include "/app/circomlib/circuits/poseidon.circom";
+include "/app/circomlib/circuits/bitify.circom";
+include "/app/circomlib/circuits/comparators.circom";
 
 /*
  * Circuit for anonymous voting
@@ -17,6 +17,8 @@ template AnonymousVote() {
     signal input choice;             // The voting choice (e.g., candidate ID)
     
     // Public inputs/outputs
+    signal input publicNullifierHash; // Public input for nullifier hash verification
+    signal input publicChoiceHash;    // Public input for choice hash verification
     signal output nullifierHash;     // Public nullifier hash (to prevent double voting)
     signal output choiceHash;        // Hash of the choice
     
@@ -26,10 +28,16 @@ template AnonymousVote() {
     nullifierHasher.inputs[1] <== nullifierSecret;
     nullifierHash <== nullifierHasher.out;
     
+    // Ensure the public nullifier hash matches our calculation
+    publicNullifierHash === nullifierHash;
+    
     // Step 2: Compute the choice hash
     component choiceHasher = Poseidon(1);
     choiceHasher.inputs[0] <== choice;
     choiceHash <== choiceHasher.out;
+    
+    // Ensure the public choice hash matches our calculation
+    publicChoiceHash === choiceHash;
 }
 
-component main { public [nullifierHash, choiceHash] } = AnonymousVote(); 
+component main { public [publicNullifierHash, publicChoiceHash] } = AnonymousVote(); 

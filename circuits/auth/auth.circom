@@ -1,7 +1,7 @@
 pragma circom 2.0.0;
 
-include "../../node_modules/circomlib/circuits/poseidon.circom";
-include "../../node_modules/circomlib/circuits/comparators.circom";
+include "/app/circomlib/circuits/poseidon.circom";
+include "/app/circomlib/circuits/comparators.circom";
 
 /*
  * Circuit for voter authentication
@@ -15,6 +15,7 @@ template VoterAuth() {
     signal input nullifierSecret;    // Random secret for nullifier, chosen by voter
     
     // Public inputs/outputs
+    signal input publicHashedIdentifier; // Public input for verification
     signal output hashedIdentifier;  // Public hash of the identifier
     signal output nullifierHash;     // Public hash to prevent double voting
     
@@ -22,6 +23,9 @@ template VoterAuth() {
     component identifierHasher = Poseidon(1);
     identifierHasher.inputs[0] <== identifierPreimage;
     hashedIdentifier <== identifierHasher.out;
+    
+    // Ensure the public hashed identifier matches our calculation
+    publicHashedIdentifier === hashedIdentifier;
     
     // Step 2: Compute the nullifier hash
     // The nullifier combines the identifier with a secret to prevent linking
@@ -31,4 +35,4 @@ template VoterAuth() {
     nullifierHash <== nullifierHasher.out;
 }
 
-component main { public [hashedIdentifier] } = VoterAuth(); 
+component main { public [publicHashedIdentifier] } = VoterAuth(); 
