@@ -294,7 +294,7 @@ export const zkpUtils = {
           pi_b: [[proofA.slice(0, 8), proofB.slice(0, 8)], [proofA.slice(8), proofB.slice(8)]],
           pi_c: [proofC, proofC.split('').reverse().join('')]
         },
-        publicSignals: [hashedIdentifier],
+        publicSignals: [hashedIdentifier, nullifierHash],
         nullifierHash
       };
       
